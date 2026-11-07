@@ -1,0 +1,14 @@
+{#- Station-days where different runs saw different values (including a
+    value later reported as ---). CDEC revises recent data, which is why each
+    run re-pulls a trailing window. -#}
+SELECT
+    s.station_id,
+    s.reading_date,
+    COUNT(DISTINCT s.run_id) AS runs_seen,
+    COUNT(DISTINCT COALESCE(CAST(s.storage_af AS VARCHAR(20)), 'missing')) AS distinct_values,
+    MIN(s.storage_af) AS min_storage_af,
+    MAX(s.storage_af) AS max_storage_af
+FROM {{ silver() }} AS s
+WHERE s.is_header = 0 AND s.reject_reason IS NULL
+GROUP BY s.station_id, s.reading_date
+HAVING COUNT(DISTINCT COALESCE(CAST(s.storage_af AS VARCHAR(20)), 'missing')) > 1

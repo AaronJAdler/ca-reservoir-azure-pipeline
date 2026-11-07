@@ -1,0 +1,21 @@
+{#- Total storage per day across the stations in the feed. The total is only
+    filled when every station that has a row that day reported a value;
+    otherwise total_storage_af is NULL and partial_storage_af shows the sum
+    of what did report. This avoids a silent dip on days with gaps. -#}
+SELECT
+    d.reading_date,
+    COUNT(*) AS stations_in_feed,
+    SUM(CASE WHEN d.storage_af IS NOT NULL THEN 1 ELSE 0 END) AS stations_reporting,
+    CASE
+        WHEN COUNT(*) = SUM(CASE WHEN d.storage_af IS NOT NULL THEN 1 ELSE 0 END)
+        THEN SUM(d.storage_af)
+        ELSE NULL
+    END AS total_storage_af,
+    SUM(d.storage_af) AS partial_storage_af,
+    CASE
+        WHEN COUNT(*) = SUM(CASE WHEN d.storage_af IS NOT NULL THEN 1 ELSE 0 END)
+        THEN ROUND(100.0 * SUM(d.storage_af) / SUM(d.capacity_af), 1)
+        ELSE NULL
+    END AS pct_capacity
+FROM {{ ref('reservoir_daily') }} AS d
+GROUP BY d.reading_date

@@ -1,0 +1,12 @@
+{#- Rows from published runs that failed a row-level rule. They stay in the
+    silver files for audit and are excluded from every other gold view. -#}
+SELECT
+    s.station_id,
+    s.reading_date,
+    s.storage_af,
+    s.data_flag,
+    s.reject_reason,
+    s.run_id,
+    s.ingested_at
+FROM {{ silver() }} AS s
+WHERE s.is_header = 0 AND s.reject_reason IS NOT NULL

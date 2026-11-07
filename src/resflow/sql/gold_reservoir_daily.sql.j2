@@ -1,0 +1,41 @@
+{#- One row per station and day. Runs are append-only, so the same day can
+    appear in many runs. The newest non-missing reading wins: a later run that
+    reports --- for a day never erases a value an earlier run had. -#}
+WITH candidates AS (
+    SELECT
+        s.station_id,
+        s.reading_date,
+        s.storage_af,
+        s.data_flag,
+        s.is_missing,
+        s.is_estimated,
+        s.is_revised,
+        s.run_id,
+        s.ingested_at,
+        ROW_NUMBER() OVER (
+            PARTITION BY s.station_id, s.reading_date
+            ORDER BY s.is_missing ASC, s.ingested_at DESC, s.run_id DESC
+        ) AS rn
+    FROM {{ silver() }} AS s
+    WHERE s.is_header = 0 AND s.reject_reason IS NULL
+)
+SELECT
+    c.station_id,
+    ref.station_name,
+    c.reading_date,
+    c.storage_af,
+    ref.capacity_af,
+    CASE
+        WHEN c.storage_af IS NULL THEN NULL
+        ELSE ROUND(100.0 * c.storage_af / ref.capacity_af, 1)
+    END AS pct_capacity,
+    c.is_missing,
+    c.is_estimated,
+    c.is_revised,
+    c.data_flag,
+    c.run_id AS source_run_id,
+    c.ingested_at
+FROM candidates AS c
+INNER JOIN {{ reference() }} AS ref
+    ON ref.station_id = c.station_id
+WHERE c.rn = 1

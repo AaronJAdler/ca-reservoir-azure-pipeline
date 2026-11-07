@@ -1,0 +1,10 @@
+{
+  "source": "https://cdec.water.ca.gov/reportapp/javareports?name=RES",
+  "retrieved": "2026-11-07",
+  "note": "Storage(AF) column of CDEC's Reservoir Conditions report, copied from the page on the retrieval date. null means the report showed ---.",
+  "storage_af": {
+    "CLE": 1629003, "SHA": 2254446, "ORO": 1452167, "BUL": 636745,
+    "FOL": 366341, "CMN": null, "NML": 1507810, "DNP": null,
+    "EXC": 502032, "MIL": 224124, "SNL": 1336648, "PNF": 186144
+  }
+}

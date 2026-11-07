@@ -1,0 +1,5 @@
+# Real CDEC responses: keep the exact bytes (CRLF) on every OS.
+tests/fixtures/*.csv -text
+# Scripts and SQL use LF everywhere.
+*.ps1 text eol=lf
+*.sql text eol=lf

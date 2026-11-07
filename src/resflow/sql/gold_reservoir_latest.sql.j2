@@ -1,0 +1,36 @@
+{#- Latest real reading per station, with its 7-day change and how many days
+    it trails the newest date in the feed. A station whose newest day is ---
+    shows its last real value and a days_behind above zero. -#}
+WITH d AS (
+    SELECT * FROM {{ ref('reservoir_daily') }} AS x
+),
+last_obs AS (
+    SELECT station_id, MAX(reading_date) AS latest_date
+    FROM d
+    WHERE storage_af IS NOT NULL
+    GROUP BY station_id
+),
+as_of AS (
+    SELECT MAX(reading_date) AS as_of_date FROM d
+)
+SELECT
+    d.station_id,
+    d.station_name,
+    d.reading_date AS latest_date,
+    d.storage_af,
+    d.capacity_af,
+    d.pct_capacity,
+    d.is_estimated,
+    wk.storage_af AS storage_af_7d_ago,
+    CASE
+        WHEN wk.storage_af IS NULL THEN NULL
+        ELSE d.storage_af - wk.storage_af
+    END AS change_7d_af,
+    {{ days_between('d.reading_date', 'a.as_of_date') }} AS days_behind
+FROM d
+INNER JOIN last_obs AS l
+    ON l.station_id = d.station_id AND l.latest_date = d.reading_date
+CROSS JOIN as_of AS a
+LEFT JOIN d AS wk
+    ON wk.station_id = d.station_id
+    AND wk.reading_date = {{ add_days('d.reading_date', -7) }}

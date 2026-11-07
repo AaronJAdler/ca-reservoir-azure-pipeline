@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+
+  test:
+    name: Tests (local lake on real CDEC fixtures, T-SQL parse)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run pytest -v
+      - name: Committed Synapse SQL matches the templates
+        run: uv run resflow render --check
+
+  infra:
+    name: Bicep build and lint
+    runs-on: ubuntu-latest
+    env:
+      BICEP_VERSION: v0.49.2
+      BICEP_SHA256: 0ab9de90c2493f206f8281bae74f9ee2d5ed3605548dab1adf41fef185e1f7c5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Bicep (pinned, checksum verified)
+        run: |
+          curl -sSfL -o bicep "https://github.com/Azure/bicep/releases/download/${BICEP_VERSION}/bicep-linux-x64"
+          echo "${BICEP_SHA256}  bicep" | sha256sum --check
+          chmod +x bicep
+          ./bicep --version
+      - name: Build (fails on errors) and lint (fails on warnings)
+        run: |
+          ./bicep build infra/main.bicep --outfile main.json
+          ./bicep lint infra/main.bicep --diagnostics-format sarif > lint.sarif
+          python3 - <<'EOF'
+          import json, sys
+          results = [r for run in json.load(open("lint.sarif"))["runs"] for r in run.get("results", [])]
+          for r in results:
+              print(r["level"], r["ruleId"], r["message"]["text"])
+          sys.exit(1 if results else 0)
+          EOF
+      - name: Pipeline JSON embeds the generated SQL
+        run: |
+          python3 - <<'EOF'
+          import json
+          t = json.dumps(json.load(open("main.json")))
+          for needle in ("CREATE EXTERNAL TABLE stg.[run_@{pipeline().RunId}]", "F4_completeness", "pl_cdec_reservoir_daily"):
+              assert needle in t, needle
+          print("ok")
+          EOF
+
+  powershell:
+    name: PowerShell scripts (parse and PSScriptAnalyzer)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Parse and analyze
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($f in Get-ChildItem scripts -Filter *.ps1) {
+            $tokens = $null; $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Host "$($f.Name): $_" }; $failed = $true }
+          }
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+            Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -Repository PSGallery
+          }
+          $issues = Invoke-ScriptAnalyzer -Path scripts -Severity Error, Warning `
+            -ExcludeRule PSAvoidUsingWriteHost
+          $issues | Format-Table -AutoSize | Out-String | Write-Host
+          if ($issues -or $failed) { exit 1 }

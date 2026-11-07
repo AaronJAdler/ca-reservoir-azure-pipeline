@@ -1,0 +1,77 @@
+{#- Parse one run's raw CDEC CSV into typed rows.
+    Every row is kept, including the header row and rejected rows, so the
+    checks query can see all of them. reject_reason is NULL for good rows. -#}
+WITH raw AS (
+    SELECT
+        {{ clean('b.c1') }} AS station_id,
+        {{ clean('b.c2') }} AS duration,
+        {{ clean('b.c3') }} AS sensor_number,
+        {{ clean('b.c4') }} AS sensor_type,
+        {{ clean('b.c5') }} AS date_time,
+        {{ clean('b.c6') }} AS obs_date_raw,
+        {{ clean('b.c7') }} AS value_raw,
+        {{ clean('b.c8') }} AS data_flag,
+        {{ clean('b.c9') }} AS units
+    FROM {{ bronze() }} AS b
+),
+typed AS (
+    SELECT
+        r.station_id,
+        r.duration,
+        r.sensor_number,
+        r.sensor_type,
+        r.date_time,
+        r.obs_date_raw,
+        r.value_raw,
+        r.data_flag,
+        r.units,
+        CASE WHEN r.station_id = 'STATION_ID' THEN 1 ELSE 0 END AS is_header,
+        TRY_CAST(CONCAT(SUBSTRING(r.date_time, 1, 4), '-', SUBSTRING(r.date_time, 5, 2), '-', SUBSTRING(r.date_time, 7, 2)) AS DATE) AS reading_date,
+        CASE WHEN r.value_raw = '---' THEN 1 ELSE 0 END AS is_missing,
+        TRY_CAST(r.value_raw AS BIGINT) AS value_af
+    FROM raw AS r
+)
+SELECT
+    t.station_id,
+    t.reading_date,
+    CASE WHEN t.is_missing = 1 THEN NULL ELSE t.value_af END AS storage_af,
+    t.data_flag,
+    t.is_missing,
+    CASE WHEN t.data_flag = 'e' THEN 1 ELSE 0 END AS is_estimated,
+    CASE WHEN t.data_flag = 'r' THEN 1 ELSE 0 END AS is_revised,
+    t.is_header,
+    CASE
+        WHEN t.is_header = 1
+            AND t.duration = 'DURATION'
+            AND t.sensor_number = 'SENSOR_NUMBER'
+            AND t.sensor_type = 'SENSOR_TYPE'
+            AND t.date_time = 'DATE TIME'
+            AND t.obs_date_raw = 'OBS DATE'
+            AND t.value_raw = 'VALUE'
+            AND t.data_flag = 'DATA_FLAG'
+            AND t.units = 'UNITS'
+        THEN 1 ELSE 0
+    END AS header_ok,
+    CASE
+        WHEN t.is_header = 1 THEN NULL
+        WHEN s.station_id IS NULL THEN 'unknown_station'
+        WHEN COALESCE(t.duration, '') <> 'D'
+            OR COALESCE(t.sensor_number, '') <> '15'
+            OR COALESCE(t.sensor_type, '') <> 'STORAGE'
+            OR COALESCE(t.units, '') <> 'AF'
+        THEN 'unexpected_sensor'
+        WHEN t.reading_date IS NULL THEN 'bad_date'
+        WHEN t.reading_date < CAST('{{ window_start }}' AS DATE)
+            OR t.reading_date > CAST('{{ window_end }}' AS DATE)
+        THEN 'outside_window'
+        WHEN t.is_missing = 0 AND t.value_af IS NULL THEN 'bad_value'
+        WHEN t.value_af < 0 OR t.value_af > 1.2 * s.capacity_af THEN 'implausible_value'
+        ELSE NULL
+    END AS reject_reason,
+    '{{ run_id }}' AS run_id,
+    '{{ ingested_at }}' AS ingested_at,
+    CAST('{{ window_start }}' AS DATE) AS window_start,
+    CAST('{{ window_end }}' AS DATE) AS window_end
+FROM typed AS t
+LEFT JOIN {{ reference() }} AS s
+    ON s.station_id = t.station_id
