@@ -1,5 +1,7 @@
 # ca-reservoir-azure-pipeline
 
+[![CI](https://github.com/AaronJAdler/ca-reservoir-azure-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/AaronJAdler/ca-reservoir-azure-pipeline/actions/workflows/ci.yml)
+
 A batch pipeline on Azure for California reservoir storage. Azure Data Factory pulls daily storage for 12 major reservoirs from CDEC (the state's California Data Exchange Center), lands the raw response in ADLS Gen2, and Synapse serverless SQL parses it, checks it and serves it as gold views. A run that fails a fatal check publishes nothing.
 
 The same SQL also runs locally on DuckDB, so every rule is tested on real CDEC responses on each commit without an Azure subscription.
@@ -42,7 +44,7 @@ Test fixtures are three real CDEC responses saved byte for byte. Their SHA-256 h
 | `bicep build` and `bicep lint` (v0.49.2) | locally | 0 errors, 0 warnings |
 | Fixture SHA-256 matches the browser capture | locally (test) | match |
 | Gold latest value for Oroville on 6 Nov 2026 equals CDEC's Reservoir Conditions report (1,452,167 AF) | locally (test) | match |
-| GitHub Actions: quality, test, infra, powershell (PSScriptAnalyzer on Windows) | GitHub Actions | see the CI badge / Actions tab |
+| GitHub Actions: lint and types, tests, Bicep build and lint, PowerShell parse + PSScriptAnalyzer (Windows) | GitHub Actions, [run 42516881042](https://github.com/AaronJAdler/ca-reservoir-azure-pipeline/actions/runs/42516881042) on a36b11d | all 4 jobs passed |
 | **Deployment to Azure and a pipeline run** | **not yet run** | **pending: see below** |
 
 What has **not** been verified: nothing in this repo has run in Azure yet. In particular, whether Synapse serverless accepts every statement (the parse check uses sqlglot, not Synapse), whether the factory's least-privilege database roles are enough for CETAS, and the exact cost. Those are confirmed only by `deploy.ps1` and `run.ps1`, and the evidence goes in `evidence/`.
